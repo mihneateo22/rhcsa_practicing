@@ -1,0 +1,225 @@
+RHCSA EX200 PRACTICE - DRILLS, 2026-10-18
+RH124 chapters 1-6 (help, files and links, redirection, shell
+environment, users and groups, sudo, password aging)
+
+ROUTINE FOR EVERY DRILL
+  1. Revert the VM to its "clean" snapshot, then run the SETUP commands.
+  2. Time limit: 60 minutes (weeks 1-2). Notes are allowed; write down
+     the task number every time you open them.
+  3. Build /root/check.sh as you go (see HACK 1 at the end).
+  4. Reboot, run the checks, and paste the output for GRADE.
+  5. Save check.sh to the repo, then revert the VM again.
+
+
+======================================================================
+DRILL 1
+======================================================================
+
+SETUP (servera, as root)
+  groupadd devs
+  useradd -G wheel vlad
+  useradd -G devs eva
+
+TASKS
+
+1. Create the following users and groups:
+   - A group named ops with GID 3000.
+   - Users andrei and ioana, who both belong to ops as a secondary
+     group.
+   - User mara, who has no access to an interactive shell and is not
+     a member of ops.
+   - The password for andrei, ioana and mara is Ex200pass.
+
+2. Members of the group ops can run any command as root using sudo,
+   and are never prompted for a password.
+
+3. User vlad must also be a member of ops and keep all of his current
+   group memberships. Rename the group devs to engineering and give it
+   GID 5000. Its existing members must remain members.
+
+4. Passwords of all users created from now on must expire after 60
+   days, with a warning 10 days before expiry. Then create user tudor
+   with UID 2600. His account expires on 2026-12-31. Separately,
+   andrei's password is valid for at most 30 days, and he must set a
+   new password the next time he logs in.
+
+5. User eva is leaving the company. She must not be able to log in by
+   any method, including SSH keys. Her account and home directory must
+   stay on the system.
+
+6. For user ioana only, every new login session must have a command
+   ll that runs "ls -lh". Her default editor for programs that read
+   the EDITOR variable must be vim.
+
+7. Create the directories /srv/archive/2026/q1 through
+   /srv/archive/2026/q4.
+   - /opt/current must refer to /srv/archive/2026/q4, and it must work
+     no matter which directory you access it from.
+   - Create /srv/archive/2026/q4/report.txt containing the text
+     "Q4 draft".
+   - /srv/archive/latest-report.txt must be a second name for the same
+     file, so that if either name is deleted, the content is still
+     reachable through the other.
+
+8. /root/sysinfo.txt must contain exactly three lines, in this order:
+   1. The running kernel version.
+   2. The full RHEL release string.
+   3. The number of lines in /etc/services, as a bare number.
+
+VERIFY (after a reboot)
+
+1. getent group ops shows GID 3000. id andrei, id ioana and id mara:
+   ops appears for the first two only. getent passwd mara ends in
+   /sbin/nologin. To test the passwords, log in as a non-root user and
+   run "su - ioana". "su - mara" accepts the password and then prints
+   "This account is currently not available". "su - andrei" forces a
+   password change (because of task 4).
+2. visudo -c reports everything as parsed OK.
+   su - ioana -c 'sudo -n id -u' prints 0.
+   sudo -l -U vlad also shows the rule (he is now in ops).
+3. id vlad lists wheel and ops. getent group engineering shows GID
+   5000 with eva listed. getent group devs prints nothing.
+4. chage -l tudor shows maximum 60, warning 10, and account expiry
+   Dec 31, 2026. id -u tudor prints 2600. chage -l andrei shows
+   "password must be changed" and maximum 30.
+5. passwd -S eva shows the password as locked. chage -l eva shows an
+   account expiry date in the past. getent passwd eva and
+   ls -ld /home/eva still exist.
+6. su - ioana, then: type ll shows an alias for ls -lh;
+   env | grep ^EDITOR prints EDITOR=vim (it must appear in env, not
+   only in echo); ls -l ~/.bashrc shows the file is still owned by
+   ioana.
+7. ls -li /srv/archive/2026/q4/report.txt /srv/archive/latest-report.txt
+   shows the same inode and a link count of 2.
+   cd /tmp && ls /opt/current/ shows report.txt.
+8. wc -l /root/sysinfo.txt prints 3. Line 3 is only an integer (no
+   file name after it) and matches the count from wc -l /etc/services.
+
+
+======================================================================
+DRILL 2
+======================================================================
+
+SETUP (servera, as root, after reverting to "clean")
+  groupadd -g 4100 finance
+  useradd -G finance,wheel radu
+  useradd -G finance cristi
+  useradd bogdan
+  mkdir /root/inbox && touch /root/inbox/{Report,report,Notes,notes}{1..3}.{txt,log}
+
+Note: on 2026-10-18 this drill was done on serverb instead of servera.
+In that case task 8 is reversed: fetch servera's release string over
+SSH from serverb into /root/servera-release.txt.
+
+TASKS
+
+1. Create a group named auditors with GID 4200. Create a user dana
+   with these properties:
+   - UID 3100
+   - Full name "Dana Ionescu"
+   - Primary group auditors
+   - Home directory /srv/dana
+   - Password Ex200pass
+
+2. dana must be able to run useradd and passwd as root using sudo. She
+   must not be able to change root's password, and she must not be
+   able to run any other command with sudo. User radu must lose his
+   administrative privileges, but he must remain a member of finance.
+
+3. Set the following password and account rules:
+   - cristi must wait at least 2 days between password changes.
+   - cristi must change his password at least every 45 days.
+   - cristi's account becomes inactive if he has not changed an
+     expired password within 7 days.
+   - dana's account expires exactly 90 days from today.
+
+4. bogdan is on extended leave. No login method may work for him,
+   including SSH keys. His account, home directory and group
+   memberships must remain unchanged.
+
+5. File cleanup in /root/inbox:
+   - Move every file whose name begins with an uppercase letter and
+     ends in .log into /root/sorted/upper.
+   - After that, delete every file remaining in /root/inbox whose name
+     contains the digit 3.
+   - /root/latest must be a symbolic link to /root/sorted/upper.
+   - /root/skel-backup must contain every file from /etc/skel, with
+     the original permissions and timestamps preserved.
+
+6. For every user, in every new login session, history must show the
+   date and time of each command. For dana only, a command "today"
+   must print the current date in YYYY-MM-DD format.
+
+7. As dana, use a single command to display the contents of
+   /etc/hosts and /etc/shadow:
+   - The readable content must go to out.txt and the error messages to
+     err.txt, both in dana's home directory.
+   - Nothing may appear on the terminal.
+   - Both files must be owned by dana.
+
+8. Create two files:
+   - /root/passwd-pages.txt must contain the one-line descriptions of
+     every manual page named passwd, as reported by the manual system.
+   - /root/serverb-release.txt on servera must contain serverb's
+     release string, retrieved over SSH from servera. Use your regular
+     account on serverb, and use serverb's IP address if the name does
+     not resolve.
+
+VERIFY (after a reboot)
+
+1. getent group auditors shows GID 4200. id dana shows uid=3100 and
+   gid=4200(auditors). getent group dana prints NOTHING.
+   getent passwd dana shows the full name and /srv/dana.
+   ls -la /srv/dana shows the skel dotfiles, owned by dana.
+2. visudo -c reports OK. sudo -l -U dana lists exactly the two
+   commands. su - dana, then: "sudo useradd testx" works (remove it
+   afterwards with userdel -r testx); "sudo passwd root" is refused;
+   "sudo cat /etc/shadow" is refused. id radu shows finance but not
+   wheel. sudo -l -U radu says he is not allowed to run sudo.
+3. chage -l cristi shows minimum 2 and maximum 45, and the "Password
+   inactive" line shows a date. In chage -l dana, the "Account
+   expires" date matches: date -d '+90 days' +%F
+4. passwd -S bogdan shows the password as locked. chage -l bogdan
+   shows an account expiry date in the past (Jan 02, 1970 with -e 1).
+   id bogdan shows his groups unchanged. ls -ld /home/bogdan shows the
+   home directory still exists.
+   Do NOT test this with "su - bogdan" as root: on RHEL, /etc/pam.d/su
+   skips the account check when root runs su, so it will succeed even
+   though the account is expired.
+5. ls /root/sorted/upper lists exactly 6 files: Notes1-3.log and
+   Report1-3.log. ls /root/inbox | wc -l prints 12, and no remaining
+   name contains a 3. readlink /root/latest prints /root/sorted/upper.
+   ls -la --time-style=full-iso /etc/skel /root/skel-backup shows the
+   same files, modes and timestamps.
+6. su - cristi, run a couple of commands, then history | tail -n 3:
+   each line shows a date and time. su - dana, then "today" prints the
+   date. As cristi, "type today" says not found.
+7. ls -l /srv/dana/out.txt /srv/dana/err.txt shows both files owned by
+   dana. diff /etc/hosts /srv/dana/out.txt prints nothing.
+   cat /srv/dana/err.txt shows one "Permission denied" line.
+8. cat /root/passwd-pages.txt shows at least the section 1 and section
+   5 entries and is not empty. cat /root/serverb-release.txt matches
+   the output of cat /etc/redhat-release on serverb.
+
+
+======================================================================
+HACKS
+======================================================================
+
+HACK 1 - Build your reboot check as you go
+  After each verify command gives the result you expected, run:
+      echo "!!" >> /root/check.sh
+  Inside double quotes, bash still does history expansion, so !!
+  becomes your last command and is appended to the file. At the end:
+  reboot, then run "bash /root/check.sh".
+  Trap: double quotes also expand $VAR, $(...) and inner " right now.
+  For check commands that contain those, write the line by hand in
+  single quotes:
+      echo 'echo "kernel: $(uname -r)"' >> /root/check.sh
+
+HACK 2 - Search --help output with grep instead of reading the whole
+man page
+      tar --help | grep -i gzip
+  Trap: a pattern that starts with a dash is read as an option for
+  grep itself. Put -e before it:
+      tar --help | grep -e '-z'

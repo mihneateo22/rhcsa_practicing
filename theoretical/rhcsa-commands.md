@@ -1,8 +1,8 @@
 # RHCSA Command Reference
 
-**Mihnea · RHCSA EX200 (RHEL 10) · RH124 · Last updated: 2026-10-17**
+**Mihnea · RHCSA EX200 (RHEL 10) · RH124 · Last updated: 2026-10-19**
 
-Covers **RH124 chapters 1–6**. Add one section per chapter using the template at the end of this file.
+Covers **RH124 chapters 1–7**. Add one section per chapter using the template at the end of this file.
 
 Every chapter has the same three parts: **Commands** (what you type), **Key files** (where the config lives), and **Exam notes** (traps, how to verify, whether it survives a reboot).
 
@@ -425,6 +425,165 @@ Streams: **0** = stdin, **1** = stdout, **2** = stderr.
 > - "User has no interactive shell" → `-s /sbin/nologin`. Check the last field of `getent passwd user`.
 > - **RHEL 9 vs 10:** on RHEL 10 `passwd` is provided by the `shadow-utils` package instead of its own package. `--stdin` still works; `chpasswd` is the fallback.
 > - Everything in this chapter writes to files in `/etc`, so it **survives a reboot** automatically.
+
+---
+
+## Chapter 7 — Control Access to Files
+
+### Read a permission string
+
+`ls -l` → `-rw-r-----. 1 harry devs 512 Oct 19 10:00 report.txt`
+
+| Part | In the example | Meaning |
+|---|---|---|
+| 1st character | `-` | Type: `-` file · `d` directory · `l` symlink · `b`/`c` device |
+| Characters 2–4 | `rw-` | **User** (owner) permissions |
+| Characters 5–7 | `r--` | **Group** permissions |
+| Characters 8–10 | `---` | **Other** permissions (everyone else) |
+| Character 11 | `.` | `.` = SELinux context set · `+` = ACL set |
+| Columns 3–4 | `harry devs` | User owner, group owner |
+
+### What `r`, `w`, `x` mean
+
+| Bit | Value | On a file | On a directory |
+|---|---|---|---|
+| `r` | 4 | Read the contents | List the names inside (`ls`) |
+| `w` | 2 | Change the contents | Create, delete, rename files inside (needs `x` too) |
+| `x` | 1 | Run it as a program | Enter it (`cd`) and open files inside by name |
+
+**Which bits apply to you — first match wins, the rest are ignored:**
+
+1. You **own** the file → only the **user** bits count.
+2. Otherwise, you are in the file's **group** → only the **group** bits count.
+3. Otherwise → the **other** bits count.
+
+root skips the `r`/`w` checks (it still needs at least one `x` bit to run a file).
+
+### Change permissions: `chmod`
+
+Symbolic form: `chmod WHO OP PERMS file`
+
+| Part | Values |
+|---|---|
+| WHO | `u` user · `g` group · `o` other · `a` all |
+| OP | `+` add · `-` remove · `=` set exactly (removes the rest) |
+| PERMS | `r` `w` `x` · `X` · `s` · `t` |
+
+| Command | What it does | Example |
+|---|---|---|
+| `chmod u+x` | Add execute for the owner | `chmod u+x backup.sh` |
+| `chmod go-rwx` | Remove all access for group and other | `chmod go-rwx secret.txt` |
+| `chmod u=rw,g=r,o=` | Set exact permissions (`o=` = none) | `chmod u=rw,g=r,o= report.txt` |
+| `chmod NNN` | Octal: one digit each for user, group, other | `chmod 750 /data/proj` |
+| `chmod -R` | Apply to a directory and everything in it | `chmod -R g+rw /data/proj` |
+| `chmod -R ... X` | `X` = execute only on directories (and files that already have an `x`) | `chmod -R o+rX /srv/www` |
+| `stat -c '%a %A %U:%G %n'` | Octal + symbolic mode, owner, group | `stat -c '%a %A %U:%G %n' /data/proj` |
+
+Octal = add the values per class: `rwx` = 7, `rw-` = 6, `r-x` = 5, `r--` = 4, `---` = 0.
+
+| Octal | Symbolic | Typical use |
+|---|---|---|
+| `600` | `rw-------` | Private file, SSH private key |
+| `640` | `rw-r-----` | File the group may read |
+| `644` | `rw-r--r--` | Normal file |
+| `700` | `rwx------` | Private directory, `~/.ssh` |
+| `750` | `rwxr-x---` | Directory the group may enter and read |
+| `755` | `rwxr-xr-x` | Normal directory or script |
+| `770` | `rwxrwx---` | Shared group directory |
+
+### Change ownership: `chown` and `chgrp`
+
+| Command | What it does | Example |
+|---|---|---|
+| `chown user file` | Change the owner (root only) | `chown harry report.txt` |
+| `chown user:group file` | Change owner and group in one go | `chown harry:devs report.txt` |
+| `chown :group file` | Change the group only | `chown :devs report.txt` |
+| `chgrp group file` | Change the group only | `chgrp devs report.txt` |
+| `chown -R` | Recursive | `chown -R harry:devs /data/proj` |
+
+- Only **root** can give a file to another owner.
+- The owner can change the group, but only to a group **they belong to**.
+- Separate user and group with `:`. The old `.` form (`harry.devs`) is deprecated.
+
+### Special permissions
+
+| Permission | Symbolic | Octal | On a file | On a directory |
+|---|---|---|---|---|
+| setuid | `u+s` | `4` | Runs as the file's **owner** (e.g. `/usr/bin/passwd` runs as root) | No effect |
+| setgid | `g+s` | `2` | Runs as the file's **group** | New files and subdirectories **inherit the directory's group** |
+| sticky | `o+t` | `1` | No effect | Users can delete or rename only **their own** files (e.g. `/tmp`) |
+
+The special digit goes **in front** of the normal three:
+
+| Command | Result in `ls -ld` |
+|---|---|
+| `chmod 2770 /shared/devs` | `drwxrws---` (setgid + `rwxrwx---`) |
+| `chmod 1777 /scratch` | `drwxrwxrwt` (sticky, like `/tmp`) |
+| `chmod 3770 /shared/devs` | `drwxrws--T` (setgid + sticky) |
+| `chmod g-s /shared/devs` | setgid removed |
+
+They show in the `x` slot: lowercase `s`/`t` = special bit **and** `x` set. Capital `S`/`T` = special bit set but **no** `x` underneath. A capital `S` is almost always a mistake; the `T` in `3770` is expected.
+
+### Default permissions: `umask`
+
+New files start at **666** (`rw-rw-rw-`), new directories at **777** (`rwxrwxrwx`). The umask lists the bits to **remove**. New files never get `x` automatically.
+
+| umask | New file | New directory |
+|---|---|---|
+| `0022` | `644` `rw-r--r--` | `755` `rwxr-xr-x` |
+| `0002` | `664` `rw-rw-r--` | `775` `rwxrwxr-x` |
+| `0027` | `640` `rw-r-----` | `750` `rwxr-x---` |
+| `0077` | `600` `rw-------` | `700` `rwx------` |
+
+| Command | What it does | Example |
+|---|---|---|
+| `umask` | Show the current umask | `umask` → `0022` |
+| `umask -S` | Show what is **allowed**, symbolically | `umask -S` → `u=rwx,g=rx,o=rx` |
+| `umask NNN` | Change it for **this shell only** | `umask 027` |
+| `su - user -c umask` | Check another user's umask after login | `su - harry -c umask` |
+
+It's masking, not subtraction: umask `033` on a new file gives `644`, not `633`.
+
+**Default on RHEL 9/10:** `0022` for root and regular users at login (RHEL 8 gave regular users `0002`). Confirm with `umask` on your VM.
+
+**Make it permanent**
+
+| Scope | How |
+|---|---|
+| One user | Add `umask 027` to that user's `~/.bashrc` (login shells read it too, via `~/.bash_profile`) |
+| All users | Create `/etc/profile.d/umask.sh` containing `umask 027` |
+
+### Find files by owner or permission
+
+| Command | What it does | Example |
+|---|---|---|
+| `find dir -user u` | Files owned by user *u* | `find / -user harry -type f 2>/dev/null` |
+| `find dir -group g` | Files with group *g* | `find /data -group devs` |
+| `find dir -perm 644` | Mode is **exactly** 644 | `find /etc -perm 644` |
+| `find dir -perm -MODE` | **All** of these bits are set | `find /usr/bin -perm -4000` (setuid programs) |
+| `find dir -perm /MODE` | **Any** of these bits is set | `find /data -perm /o=w` (writable by others) |
+| `find ... -exec cmd {} \;` | Run *cmd* on every match | `find / -user harry -type f -exec cp -a {} /root/harry/ \; 2>/dev/null` |
+
+### Key files
+
+| File | Purpose |
+|---|---|
+| `/etc/login.defs` | `UMASK` (system default, `022`) and `HOME_MODE` (`0700`, permissions of new home directories) |
+| `/etc/profile.d/*.sh` | Where a system-wide umask goes |
+| `~/.bashrc` | Where a per-user umask goes |
+
+### Exam notes
+
+> - **Collaborative directory** ("members of `devs` share `/shared/devs`, new files belong to `devs`, nobody else gets in"): `mkdir -p /shared/devs; chgrp devs /shared/devs; chmod 2770 /shared/devs`. Verify `ls -ld /shared/devs` → `drwxrws---. root devs`, then `su - harry -c 'touch /shared/devs/t; ls -l /shared/devs/t'` → group is `devs`.
+> - "...and users may delete only their own files" → add sticky: `chmod 3770`. Expect `drwxrws--T`.
+> - **Test as the user, never as root.** root skips `r`/`w` checks, so a test as root proves nothing. Use `su - user -c 'cmd'`.
+> - **Deleting a file depends on the directory**, not the file: `w` + `x` on the directory lets you delete even a read-only file you don't own (unless sticky is set).
+> - **Owner bits win.** If harry owns a file, changing group or other bits never affects harry. Read the task: who is the owner?
+> - `chmod -R 755 dir` makes every file executable. Use `chmod -R u=rwX,go=rX dir` instead.
+> - **Numeric `chmod` keeps setgid on directories.** `chmod 770 /shared/devs` leaves the `s` in place. To remove it: `chmod g-s`. Always check with `ls -ld` afterwards.
+> - In a setgid directory with umask `0022`, group members can **read** each other's files but not **edit** them. If the task says they must edit, they need umask `0002` or `chmod g+w` on the files. (Some course text written for RHEL 8 assumes `0002`.)
+> - `ls -l` on a symlink always shows `lrwxrwxrwx`. Only the target's permissions matter: `ls -lL link` shows them.
+> - **Reboot:** permissions and ownership live in the inode, so they persist. A `umask` typed at the prompt dies with the shell. Put it in `~/.bashrc` or `/etc/profile.d/`, then verify with `su - user -c umask`.
 
 ---
 
